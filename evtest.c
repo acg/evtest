@@ -14,14 +14,13 @@
 
 typedef struct
 {
-  int rfd;
-  int wfd;
+  int fd;
   char *buf;
   int size;
   int len;
   int eof;
 }
-iopipe_t;
+fdio_t;
 
 typedef struct client_def_t client_t;
 
@@ -34,11 +33,13 @@ ev_io_client;
 
 struct client_def_t
 {
-  char            buf[ BUFSIZE ];
-  int             active;
-  iopipe_t        iopipe;
+  char            rbuf[ BUFSIZE ];
+  char            wbuf[ BUFSIZE ];
+  fdio_t          rio;
+  fdio_t          wio;
   ev_io_client    ev_reader;
   ev_io_client    ev_writer;
+  int             active;
 };
 
 static client_t clients[ MAX_CLIENTS ];
@@ -55,21 +56,89 @@ int add_unix_listener( struct ev_loop *loop, ev_io* ev_listener, const char *soc
 void on_reader(struct ev_loop *loop, ev_io *watcher, int revents);
 void on_writer(struct ev_loop *loop, ev_io *watcher, int revents);
 void on_unix_listener(struct ev_loop *loop, ev_io *watcher, int revents);
-void on_timeout(struct ev_loop *loop, ev_timer *watcher, int revents);
+void on_timer(struct ev_loop *loop, ev_timer *watcher, int revents);
 
+/* application handlers */
+
+int on_data( struct ev_loop *loop, client_t* client );
+int on_command( client_t* client, const char* input, char* output, int *outsize );
+
+
+int on_data( struct ev_loop *loop, client_t* client )
+{
+  fdio_t *rio = &client->rio;
+  fdio_t *wio = &client->wio;
+
+  char *p;
+
+  while (p = memchr( rio->buf, '\n', rio->len ))
+  {
+    *p++ = '\0';
+
+    char *input = rio->buf;
+    char *output = wio->buf + wio->len;
+    int outsize = wio->size - wio->len;
+    int oldsize = outsize;
+
+    on_command( client, input, output, &outsize );
+
+    /* Drain read buffer FIXME factor out */
+
+    int left = rio->len - (p-input);
+
+    if (left > 0)
+      memmove( rio->buf, p, left );
+
+    rio->len = left;
+
+    /* Append to write buffer FIXME factor out */
+
+    int bytes = oldsize - outsize;
+
+    if (bytes > 0)
+    {
+      if (!wio->len) ev_io_start( loop, (ev_io*)&client->ev_writer );
+      wio->len += bytes;
+      *(wio->buf + wio->len - 1) = '\n';
+    }
+  }
+
+  return 0;
+}
+
+
+int on_command( client_t* client, const char* input, char* output, int *outsize )
+{
+  const char *response = "";
+
+  if (0 == strcmp( "hello", input ))
+    response = "world";
+  else
+    response = "error";
+
+  size_t len = strlen( response );
+
+  if (len+1 > *outsize)
+    return -1;
+
+  strcpy( output, response );
+  *outsize -= len+1;
+
+  return 0;
+}
 
 
 void on_reader(struct ev_loop *loop, ev_io *watcher, int revents)
 {
   client_t *client = ((ev_io_client*)watcher)->client;
-  iopipe_t *x = &client->iopipe;
+  fdio_t *x = &client->rio;
 
-  fprintf( stderr, "fd %d readable\n", x->rfd );
+  fprintf( stderr, "fd %d readable\n", x->fd );
 
   int oldlen = x->len;
   ssize_t bytes;
 
-  if ((bytes = read(x->rfd, x->buf+x->len, x->size-x->len)) < 0)
+  if ((bytes = read(x->fd, x->buf+x->len, x->size-x->len)) < 0)
     strerr_diesys( "read error" );
 
   x->len += bytes;
@@ -81,22 +150,24 @@ void on_reader(struct ev_loop *loop, ev_io *watcher, int revents)
 
   if (x->len == x->size || x->eof)
     ev_io_stop( loop, watcher );
-  if (x->len > 0 && !oldlen)
-    ev_io_start( loop, (ev_io*)&client->ev_writer );
+
+  /* Call application handler */
+
+  on_data( loop, client );
 }
 
 
 void on_writer(struct ev_loop *loop, ev_io *watcher, int revents)
 {
   client_t *client = ((ev_io_client*)watcher)->client;
-  iopipe_t *x = &client->iopipe;
+  fdio_t *x = &client->wio;
 
-  fprintf( stderr, "fd %d writable\n", x->wfd );
+  fprintf( stderr, "fd %d writable\n", x->fd );
 
   int oldlen = x->len;
   ssize_t bytes;
 
-  if ((bytes = write(x->wfd, x->buf, x->len)) < 0)
+  if ((bytes = write(x->fd, x->buf, x->len)) < 0)
     strerr_diesys( "write error" );
 
   int left = x->len - bytes;
@@ -139,8 +210,8 @@ int free_client( client_t *clients, client_t *client )
 
   for (i=0, c=clients; i<MAX_CLIENTS; i++, c++)
     if (c == client) {
-      close( c->iopipe.rfd );
-      close( c->iopipe.wfd );
+      close( c->rio.fd );
+      close( c->wio.fd );
       memset( c, 0, sizeof *c );
       return 0;
     }
@@ -157,14 +228,20 @@ int add_client( struct ev_loop *loop, client_t *clients, int rfd, int wfd )
   if (!client)
     return -1;
 
-  iopipe_t *iopipe = &client->iopipe;
+  fdio_t *rio = &client->rio;
+  fdio_t *wio = &client->wio;
 
-  iopipe->rfd = rfd;
-  iopipe->wfd = wfd;
-  iopipe->buf = client->buf;
-  iopipe->size = sizeof client->buf;
-  iopipe->len = 0;
-  iopipe->eof = 0;
+  rio->fd = rfd;
+  rio->buf = client->rbuf;
+  rio->size = sizeof client->rbuf;
+  rio->len = 0;
+  rio->eof = 0;
+
+  wio->fd = wfd;
+  wio->buf = client->wbuf;
+  wio->size = sizeof client->wbuf;
+  wio->len = 0;
+  wio->eof = 0;
 
   ev_io_client *ev_reader = &client->ev_reader;
   ev_io_client *ev_writer = &client->ev_writer;
@@ -222,11 +299,11 @@ void on_unix_listener(struct ev_loop *loop, ev_io *watcher, int revents)
 }
 
 
-void on_timeout(struct ev_loop *loop, ev_timer *watcher, int revents)
+void on_timer(struct ev_loop *loop, ev_timer *watcher, int revents)
 {
   struct timeval now;
   gettimeofday( &now, 0 );
-  fprintf( stderr, "+%lu.%06lu timeout event\n", now.tv_sec, now.tv_usec );
+  fprintf( stderr, "[%lu.%06lu] timer event\n", now.tv_sec, now.tv_usec );
 }
 
 
@@ -260,7 +337,7 @@ int main( int argc, char **argv )
   /* Timeout */
 
   ev_timer timer;
-  ev_timer_init( &timer, on_timeout, 5., 5. );
+  ev_timer_init( &timer, on_timer, 5., 5. );
   ev_timer_start( loop, &timer );
 
   /* Enter main event loop */
