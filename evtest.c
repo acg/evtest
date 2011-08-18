@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "strerr.h"
+#include "ndelay.h"
 
 
 #define MAX_CLIENTS 3
@@ -68,6 +69,8 @@ int on_data( struct ev_loop *loop, client_t* client )
 {
   fdio_t *rio = &client->rio;
   fdio_t *wio = &client->wio;
+
+  /* Parse and respond to line-delimited requests. */
 
   char *p;
 
@@ -295,6 +298,9 @@ void on_unix_listener(struct ev_loop *loop, ev_io *watcher, int revents)
   if ((sock = accept(watcher->fd, (struct sockaddr*)&addr, &addr_len)) < 0)
     strerr_diesys( "accept error" );
 
+  if (ndelay_on( sock ) < 0)
+    strerr_diesys( "fcntl error" );
+
   add_client( loop, clients, sock, sock ); 
 }
 
@@ -309,6 +315,8 @@ void on_timer(struct ev_loop *loop, ev_timer *watcher, int revents)
 
 int main( int argc, char **argv )
 {
+  int i;
+
   /* Argument processing */
 
   char *prog = *argv++; argc--;
@@ -326,7 +334,10 @@ int main( int argc, char **argv )
 
   /* Standard io */
 
-  // TODO use non-blocking
+  for (i=0; i<2; i++)
+    if (ndelay_on( i ) < 0)
+      strerr_diesys( "fcntl error" );
+
   add_client( loop, clients, 0, 1 );
 
   /* Unix domain socket listener */
