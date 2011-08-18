@@ -1,6 +1,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/time.h>
 #include <ev.h>
 #include <stdio.h>
 #include <string.h>
@@ -54,6 +55,7 @@ int add_unix_listener( struct ev_loop *loop, ev_io* ev_listener, const char *soc
 void on_reader(struct ev_loop *loop, ev_io *watcher, int revents);
 void on_writer(struct ev_loop *loop, ev_io *watcher, int revents);
 void on_unix_listener(struct ev_loop *loop, ev_io *watcher, int revents);
+void on_timeout(struct ev_loop *loop, ev_timer *watcher, int revents);
 
 
 
@@ -189,6 +191,8 @@ int add_unix_listener( struct ev_loop *loop, ev_io* ev_listener, const char *soc
   addr.sun_family = AF_UNIX;
   strncpy( addr.sun_path, sockpath, sizeof(addr.sun_path)-1 );
 
+  unlink( sockpath ); /* don't care if this fails */
+
   if ((listenfd = socket( AF_UNIX, SOCK_STREAM, 0 )) < 0)
     strerr_diesys("socket error");
   if (bind(listenfd, (struct sockaddr*)&addr, sizeof addr) < 0)
@@ -218,6 +222,14 @@ void on_unix_listener(struct ev_loop *loop, ev_io *watcher, int revents)
 }
 
 
+void on_timeout(struct ev_loop *loop, ev_timer *watcher, int revents)
+{
+  struct timeval now;
+  gettimeofday( &now, 0 );
+  fprintf( stderr, "+%lu.%06lu timeout event\n", now.tv_sec, now.tv_usec );
+}
+
+
 int main( int argc, char **argv )
 {
   /* Argument processing */
@@ -231,14 +243,25 @@ int main( int argc, char **argv )
 
   char *sockpath = *argv++; argc--;
 
-  /* Standard io */
-  // TODO use non-blocking
+  /* Event setup */
 
   struct ev_loop *loop = EV_DEFAULT;
-  ev_io ev_listener;
 
+  /* Standard io */
+
+  // TODO use non-blocking
   add_client( loop, clients, 0, 1 );
+
+  /* Unix domain socket listener */
+
+  ev_io ev_listener;
   add_unix_listener( loop, &ev_listener, sockpath );
+
+  /* Timeout */
+
+  ev_timer timer;
+  ev_timer_init( &timer, on_timeout, 5., 5. );
+  ev_timer_start( loop, &timer );
 
   /* Enter main event loop */
 
