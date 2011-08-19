@@ -42,3 +42,5 @@ int ev_iochannel_init
   size_t wsize
 );
 
+int ev_iochannel_start( ev_iochannel_t *self );
+

@@ -2,6 +2,14 @@
 #include <string.h>  // memset
 
 
+int check_for_close( ev_iochannel_t* self )
+{
+  if (self->rio.eof && !self->wio.len)
+    if (self->on_close)
+      self->on_close( self );
+  return 0;
+}
+
 int on_rio_full( iobuf_t *io )
 {
   ev_iochannel_t *self = (ev_iochannel_t*)io->ctx;
@@ -13,11 +21,7 @@ int on_wio_empty( iobuf_t *io )
 {
   ev_iochannel_t *self = (ev_iochannel_t*)io->ctx;
   ev_io_stop( self->loop, &self->ev_wio.watcher );
-
-  if (self->rio.eof)
-    if (self->on_close)
-      self->on_close( self );
-
+  check_for_close( self );
   return 0;
 }  
 
@@ -32,11 +36,7 @@ int on_rio_eof( iobuf_t *io )
 {
   ev_iochannel_t *self = (ev_iochannel_t*)io->ctx;
   ev_io_stop( self->loop, &self->ev_rio.watcher );
-
-  if (!self->wio.len)
-    if (self->on_close)
-      self->on_close( self );
-
+  check_for_close( self );
   return 0;
 }  
 
@@ -100,12 +100,17 @@ int ev_iochannel_init
 
   ev_init( (ev_io*)&self->ev_rio, ev_iobuf_reader );
   ev_io_set( (ev_io*)&self->ev_rio, rfd, EV_READ );
-  // FIXME start this now, or wait?
-  ev_io_start( loop, (ev_io*)&self->ev_rio );
 
   ev_init( (ev_io*)&self->ev_wio, ev_iobuf_writer );
   ev_io_set( (ev_io*)&self->ev_wio, wfd, EV_WRITE );
 
+  return 0;
+}
+
+
+int ev_iochannel_start( ev_iochannel_t *self )
+{
+  ev_io_start( self->loop, (ev_io*)&self->ev_rio );
   return 0;
 }
 

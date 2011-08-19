@@ -1,5 +1,6 @@
 /*
   A libev test program that demos:
+
      * a unix domain socket listener
      * client connections with a simple request / response protocol
      * treat stdin / stdout as another client channel
@@ -120,6 +121,7 @@ int add_client( struct ev_loop *loop, client_t *clients, int rfd, int wfd )
 
   ev_iochannel->on_data = on_data;
   ev_iochannel->on_close = on_close;
+  ev_iochannel_start( ev_iochannel );
 
   return 0;
 }
