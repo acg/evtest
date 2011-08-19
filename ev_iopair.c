@@ -32,6 +32,11 @@ int on_rio_eof( iobuf_t *io )
 {
   ev_iopair_t *self = (ev_iopair_t*)io->ctx;
   ev_io_stop( self->loop, &self->ev_rio.watcher );
+
+  if (!self->wio.len)
+    if (self->on_close)
+      self->on_close( self );
+
   return 0;
 }  
 
