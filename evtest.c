@@ -5,6 +5,7 @@
 #include <ev.h>
 #include <stdio.h>
 #include <string.h>
+#include "ev_iopair.h"
 #include "strerr.h"
 #include "ndelay.h"
 
@@ -13,33 +14,16 @@
 #define BUFSIZE 1024
 
 
-typedef struct
-{
-  int fd;
-  char *buf;
-  int size;
-  int len;
-  int eof;
-}
-fdio_t;
+/* --------------------------------------------------------------------- */
+
 
 typedef struct client_def_t client_t;
-
-typedef struct
-{
-  ev_io watcher;
-  client_t *client;
-}
-ev_io_client;
 
 struct client_def_t
 {
   char            rbuf[ BUFSIZE ];
   char            wbuf[ BUFSIZE ];
-  fdio_t          rio;
-  fdio_t          wio;
-  ev_io_client    ev_reader;
-  ev_io_client    ev_writer;
+  ev_iopair_t     ev_iopair;
   int             active;
 };
 
@@ -54,21 +38,22 @@ int add_unix_listener( struct ev_loop *loop, ev_io* ev_listener, const char *soc
 
 /* libev event callbacks */
 
-void on_reader(struct ev_loop *loop, ev_io *watcher, int revents);
-void on_writer(struct ev_loop *loop, ev_io *watcher, int revents);
 void on_unix_listener(struct ev_loop *loop, ev_io *watcher, int revents);
 void on_timer(struct ev_loop *loop, ev_timer *watcher, int revents);
 
+
+/* --------------------------------------------------------------------- */
 /* application handlers */
 
-int on_data( struct ev_loop *loop, client_t* client );
-int on_command( client_t* client, const char* input, char* output, int *outsize );
+int on_data( ev_iopair_t* ev_iopair );
+int on_command( void *ctx, const char* input, char* output, int *outsize );
+int on_close( ev_iopair_t* ev_iopair );
 
 
-int on_data( struct ev_loop *loop, client_t* client )
+int on_data( ev_iopair_t* ev_iopair )
 {
-  fdio_t *rio = &client->rio;
-  fdio_t *wio = &client->wio;
+  iobuf_t *rio = &ev_iopair->rio;
+  iobuf_t *wio = &ev_iopair->wio;
 
   /* Parse and respond to line-delimited requests. */
 
@@ -80,37 +65,34 @@ int on_data( struct ev_loop *loop, client_t* client )
 
     char *input = rio->buf;
     char *output = wio->buf + wio->len;
-    int outsize = wio->size - wio->len;
-    int oldsize = outsize;
+    size_t outsize = wio->size - wio->len;
+    size_t oldsize = outsize;
+    int rc;
 
-    on_command( client, input, output, &outsize );
+    rc = on_command( ev_iopair->ctx, input, output, &outsize );
 
-    /* Drain read buffer FIXME factor out */
+    ssize_t nread = p - input;
+    ssize_t nwritten = oldsize - outsize;
 
-    int left = rio->len - (p-input);
+    rio->on_data_removed( rio, nread );
 
-    if (left > 0)
-      memmove( rio->buf, p, left );
+    /* on_command failed, or nothing written for some other reason */
 
-    rio->len = left;
+    if (rc || nwritten <= 0)
+      continue;
 
-    /* Append to write buffer FIXME factor out */
+    /* Turn null response terminator into newline */
 
-    int bytes = oldsize - outsize;
+    *(wio->buf + wio->len + nwritten - 1) = '\n';
 
-    if (bytes > 0)
-    {
-      if (!wio->len) ev_io_start( loop, (ev_io*)&client->ev_writer );
-      wio->len += bytes;
-      *(wio->buf + wio->len - 1) = '\n';
-    }
+    rio->on_data_added( wio, nwritten );
   }
 
   return 0;
 }
 
 
-int on_command( client_t* client, const char* input, char* output, int *outsize )
+int on_command( void *ctx, const char* input, char* output, int *outsize )
 {
   const char *response = "";
 
@@ -131,63 +113,11 @@ int on_command( client_t* client, const char* input, char* output, int *outsize 
 }
 
 
-void on_reader(struct ev_loop *loop, ev_io *watcher, int revents)
+int on_close( ev_iopair_t* ev_iopair )
 {
-  client_t *client = ((ev_io_client*)watcher)->client;
-  fdio_t *x = &client->rio;
-
-  fprintf( stderr, "fd %d readable\n", x->fd );
-
-  int oldlen = x->len;
-  ssize_t bytes;
-
-  if ((bytes = read(x->fd, x->buf+x->len, x->size-x->len)) < 0)
-    strerr_diesys( "read error" );
-
-  x->len += bytes;
-  
-  if (bytes == 0)
-    x->eof = 1;
-
-  fprintf( stderr, "read %u bytes, len = %u\n", bytes, x->len );
-
-  if (x->len == x->size || x->eof)
-    ev_io_stop( loop, watcher );
-
-  /* Call application handler */
-
-  on_data( loop, client );
-}
-
-
-void on_writer(struct ev_loop *loop, ev_io *watcher, int revents)
-{
-  client_t *client = ((ev_io_client*)watcher)->client;
-  fdio_t *x = &client->wio;
-
-  fprintf( stderr, "fd %d writable\n", x->fd );
-
-  int oldlen = x->len;
-  ssize_t bytes;
-
-  if ((bytes = write(x->fd, x->buf, x->len)) < 0)
-    strerr_diesys( "write error" );
-
-  int left = x->len - bytes;
-
-  if (bytes > 0 && left > 0)
-    memmove( x->buf, x->buf+bytes, left );
-
-  x->len = left;
-
-  fprintf( stderr, "wrote %u bytes, len = %u\n", bytes, x->len );
-
-  if (x->len == 0) {
-    ev_io_stop( loop, watcher );
-    if (x->eof) free_client( clients, client );
-  }
-  if (!x->eof && x->len < x->size && oldlen == x->size)
-    ev_io_start( loop, (ev_io*)&client->ev_reader );
+  client_t *client = (client_t*)ev_iopair->ctx;
+  free_client( clients, client );
+  return 0;
 }
 
 
@@ -213,8 +143,8 @@ int free_client( client_t *clients, client_t *client )
 
   for (i=0, c=clients; i<MAX_CLIENTS; i++, c++)
     if (c == client) {
-      close( c->rio.fd );
-      close( c->wio.fd );
+      close( c->ev_iopair.rio.fd );
+      close( c->ev_iopair.wio.fd );
       memset( c, 0, sizeof *c );
       return 0;
     }
@@ -231,32 +161,15 @@ int add_client( struct ev_loop *loop, client_t *clients, int rfd, int wfd )
   if (!client)
     return -1;
 
-  fdio_t *rio = &client->rio;
-  fdio_t *wio = &client->wio;
+  ev_iopair_t *ev_iopair = &client->ev_iopair;
 
-  rio->fd = rfd;
-  rio->buf = client->rbuf;
-  rio->size = sizeof client->rbuf;
-  rio->len = 0;
-  rio->eof = 0;
+  ev_iopair_init(
+    ev_iopair, loop, client,
+    rfd, client->rbuf, sizeof client->rbuf,
+    wfd, client->wbuf, sizeof client->wbuf
+  );
 
-  wio->fd = wfd;
-  wio->buf = client->wbuf;
-  wio->size = sizeof client->wbuf;
-  wio->len = 0;
-  wio->eof = 0;
-
-  ev_io_client *ev_reader = &client->ev_reader;
-  ev_io_client *ev_writer = &client->ev_writer;
-  ev_reader->client = client;
-  ev_writer->client = client;
-
-  ev_init( (ev_io*)ev_reader, on_reader );
-  ev_io_set( (ev_io*)ev_reader, rfd, EV_READ );
-  ev_io_start( loop, (ev_io*)ev_reader );
-
-  ev_init( (ev_io*)ev_writer, on_writer );
-  ev_io_set( (ev_io*)ev_writer, wfd, EV_WRITE );
+  ev_iopair->on_data = on_data;
 
   return 0;
 }

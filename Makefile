@@ -1,9 +1,17 @@
 TARGET = evtest
 
+CFLAGS = -g
 LDFLAGS = 
 LIBS = -lev
 
-$(TARGET) : evtest.o ndelay_on.o
+OBJECTS = \
+	evtest.o \
+	ev_iobuf.o \
+	ev_iopair.o \
+	iobuf.o \
+	ndelay_on.o 
+
+$(TARGET) : $(OBJECTS)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LIBS)
 
 %.o : %.c
