@@ -20,12 +20,9 @@ struct ev_iochannel_def_t
 
   ev_iochannel_callback on_data;
   ev_iochannel_callback on_close;
-
   // TODO: 
   // on_writable?
   // on_readable?
-  // on_reof?
-  // on_done?
 };
 
 
