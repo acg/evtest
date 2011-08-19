@@ -1,3 +1,13 @@
+/*
+  A libev test program that demos:
+     * a unix domain socket listener
+     * client connections with a simple request / response protocol
+     * treat stdin / stdout as another client channel
+     * timer events
+
+  Alan Grow (c) 2011
+*/
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -9,9 +19,12 @@
 #include "strerr.h"
 #include "ndelay.h"
 
+
 #define MAX_CLIENTS 3
 #define BUFSIZE 1024
 
+
+/* A client list */
 
 typedef struct client_def_t client_t;
 
@@ -19,19 +32,21 @@ struct client_def_t
 {
   char            rbuf[ BUFSIZE ];
   char            wbuf[ BUFSIZE ];
-  ev_iochannel_t     ev_iochannel;
+  ev_iochannel_t  ev_iochannel;
   int             active;
 };
+
+/* A static list of clients. Simple, avoids malloc / free. */
 
 static client_t clients[ MAX_CLIENTS ];
 
 
-/* client list operations */
+/* Client list operations */
 
 client_t* new_client( client_t *clients );
 int free_client( client_t *clients, client_t *client );
 
-/* registering event sources with libev */
+/* Registering event sources with libev */
 
 int add_client( struct ev_loop *loop, client_t *clients, int rfd, int wfd );
 int add_unix_listener( struct ev_loop *loop, ev_io* ev_listener, const char *sockpath );
@@ -41,12 +56,14 @@ int add_unix_listener( struct ev_loop *loop, ev_io* ev_listener, const char *soc
 void on_unix_listener( struct ev_loop *loop, ev_io *watcher, int revents );
 void on_timer( struct ev_loop *loop, ev_timer *watcher, int revents );
 
-/* application handlers */
+/* Application level event handlers */
 
 int on_data( ev_iochannel_t* ev_iochannel );
 int on_command( void *ctx, const char* input, char* output, int *outsize );
 int on_close( ev_iochannel_t* ev_iochannel );
 
+
+/* Find a new free ( = inactive, zero'd out ) slot in the clients array */
 
 client_t* new_client( client_t *clients )
 {
@@ -62,6 +79,8 @@ client_t* new_client( client_t *clients )
   return NULL;
 }
 
+
+/* Free a slot in the clients array */
 
 int free_client( client_t *clients, client_t *client )
 {
@@ -79,6 +98,9 @@ int free_client( client_t *clients, client_t *client )
   return -1;
 }
 
+
+/* Create a new client with an event channel around a r/w fd pair.
+   Register the event channel with libev. */
 
 int add_client( struct ev_loop *loop, client_t *clients, int rfd, int wfd )
 {
@@ -102,6 +124,8 @@ int add_client( struct ev_loop *loop, client_t *clients, int rfd, int wfd )
   return 0;
 }
 
+
+/* Register a new unix domain socket listener event source with libev. */
 
 int add_unix_listener( struct ev_loop *loop, ev_io* ev_listener, const char *sockpath )
 {
@@ -129,6 +153,8 @@ int add_unix_listener( struct ev_loop *loop, ev_io* ev_listener, const char *soc
 }
 
 
+/* When the unix domain sock is readable, accept and register a new client. */
+
 void on_unix_listener( struct ev_loop *loop, ev_io *watcher, int revents )
 {
   int sock;
@@ -146,6 +172,8 @@ void on_unix_listener( struct ev_loop *loop, ev_io *watcher, int revents )
 }
 
 
+/* Handle a libev timer event. */
+
 void on_timer( struct ev_loop *loop, ev_timer *watcher, int revents )
 {
   struct timeval now;
@@ -153,6 +181,9 @@ void on_timer( struct ev_loop *loop, ev_timer *watcher, int revents )
   fprintf( stderr, "[%lu.%06lu] timer event\n", now.tv_sec, now.tv_usec );
 }
 
+
+/* New data arrived in the client's event channel.
+   Act as a request / response command filter using a line delimited protocol. */
 
 int on_data( ev_iochannel_t* ev_iochannel )
 {
@@ -196,9 +227,13 @@ int on_data( ev_iochannel_t* ev_iochannel )
 }
 
 
+/* Handle a command request, produce a response. */
+
 int on_command( void *ctx, const char* input, char* output, int *outsize )
 {
   const char *response = "";
+
+  /* trivial and silly for now */
 
   if (0 == strcmp( "hello", input ))
     response = "world";
@@ -216,6 +251,8 @@ int on_command( void *ctx, const char* input, char* output, int *outsize )
   return 0;
 }
 
+
+/* Both sides of the client's event channel have closed. */
 
 int on_close( ev_iochannel_t* ev_iochannel )
 {
@@ -257,7 +294,7 @@ int main( int argc, char **argv )
   ev_io ev_listener;
   add_unix_listener( loop, &ev_listener, sockpath );
 
-  /* Timeout */
+  /* Timer */
 
   ev_timer timer;
   ev_timer_init( &timer, on_timer, 5., 5. );
