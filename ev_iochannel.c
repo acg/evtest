@@ -1,17 +1,17 @@
-#include "ev_iopair.h"
+#include "ev_iochannel.h"
 #include <string.h>  // memset
 
 
 int on_rio_full( iobuf_t *io )
 {
-  ev_iopair_t *self = (ev_iopair_t*)io->ctx;
+  ev_iochannel_t *self = (ev_iochannel_t*)io->ctx;
   ev_io_stop( self->loop, &self->ev_rio.watcher );
   return 0;
 }
 
 int on_wio_empty( iobuf_t *io )
 {
-  ev_iopair_t *self = (ev_iopair_t*)io->ctx;
+  ev_iochannel_t *self = (ev_iochannel_t*)io->ctx;
   ev_io_stop( self->loop, &self->ev_wio.watcher );
 
   if (self->rio.eof)
@@ -23,14 +23,14 @@ int on_wio_empty( iobuf_t *io )
 
 int on_rio_nonfull( iobuf_t *io )
 {
-  ev_iopair_t *self = (ev_iopair_t*)io->ctx;
+  ev_iochannel_t *self = (ev_iochannel_t*)io->ctx;
   ev_io_start( self->loop, &self->ev_rio.watcher );
   return 0;
 }  
 
 int on_rio_eof( iobuf_t *io )
 {
-  ev_iopair_t *self = (ev_iopair_t*)io->ctx;
+  ev_iochannel_t *self = (ev_iochannel_t*)io->ctx;
   ev_io_stop( self->loop, &self->ev_rio.watcher );
 
   if (!self->wio.len)
@@ -42,21 +42,21 @@ int on_rio_eof( iobuf_t *io )
 
 int on_wio_nonempty( iobuf_t *io )
 {
-  ev_iopair_t *self = (ev_iopair_t*)io->ctx;
+  ev_iochannel_t *self = (ev_iochannel_t*)io->ctx;
   ev_io_start( self->loop, &self->ev_wio.watcher );
   return 0;
 }
 
 int on_rio_data( iobuf_t *io )
 {
-  ev_iopair_t *self = (ev_iopair_t*)io->ctx;
+  ev_iochannel_t *self = (ev_iochannel_t*)io->ctx;
   if (self->on_data) return self->on_data( self );
   return 0;
 }
 
-int ev_iopair_init
+int ev_iochannel_init
 (
-  ev_iopair_t *self,
+  ev_iochannel_t *self,
   struct ev_loop *loop,
   void *ctx,
   int rfd,

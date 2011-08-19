@@ -5,7 +5,7 @@
 #include <ev.h>
 #include <stdio.h>
 #include <string.h>
-#include "ev_iopair.h"
+#include "ev_iochannel.h"
 #include "strerr.h"
 #include "ndelay.h"
 
@@ -19,7 +19,7 @@ struct client_def_t
 {
   char            rbuf[ BUFSIZE ];
   char            wbuf[ BUFSIZE ];
-  ev_iopair_t     ev_iopair;
+  ev_iochannel_t     ev_iochannel;
   int             active;
 };
 
@@ -43,9 +43,9 @@ void on_timer( struct ev_loop *loop, ev_timer *watcher, int revents );
 
 /* application handlers */
 
-int on_data( ev_iopair_t* ev_iopair );
+int on_data( ev_iochannel_t* ev_iochannel );
 int on_command( void *ctx, const char* input, char* output, int *outsize );
-int on_close( ev_iopair_t* ev_iopair );
+int on_close( ev_iochannel_t* ev_iochannel );
 
 
 client_t* new_client( client_t *clients )
@@ -70,8 +70,8 @@ int free_client( client_t *clients, client_t *client )
 
   for (i=0, c=clients; i<MAX_CLIENTS; i++, c++)
     if (c == client) {
-      close( c->ev_iopair.rio.fd );
-      close( c->ev_iopair.wio.fd );
+      close( c->ev_iochannel.rio.fd );
+      close( c->ev_iochannel.wio.fd );
       memset( c, 0, sizeof *c );
       return 0;
     }
@@ -88,16 +88,16 @@ int add_client( struct ev_loop *loop, client_t *clients, int rfd, int wfd )
   if (!client)
     return -1;
 
-  ev_iopair_t *ev_iopair = &client->ev_iopair;
+  ev_iochannel_t *ev_iochannel = &client->ev_iochannel;
 
-  ev_iopair_init(
-    ev_iopair, loop, client,
+  ev_iochannel_init(
+    ev_iochannel, loop, client,
     rfd, client->rbuf, sizeof client->rbuf,
     wfd, client->wbuf, sizeof client->wbuf
   );
 
-  ev_iopair->on_data = on_data;
-  ev_iopair->on_close = on_close;
+  ev_iochannel->on_data = on_data;
+  ev_iochannel->on_close = on_close;
 
   return 0;
 }
@@ -154,10 +154,10 @@ void on_timer( struct ev_loop *loop, ev_timer *watcher, int revents )
 }
 
 
-int on_data( ev_iopair_t* ev_iopair )
+int on_data( ev_iochannel_t* ev_iochannel )
 {
-  iobuf_t *rio = &ev_iopair->rio;
-  iobuf_t *wio = &ev_iopair->wio;
+  iobuf_t *rio = &ev_iochannel->rio;
+  iobuf_t *wio = &ev_iochannel->wio;
 
   /* Parse and respond to line-delimited requests. */
 
@@ -173,7 +173,7 @@ int on_data( ev_iopair_t* ev_iopair )
     size_t oldsize = outsize;
     int rc;
 
-    rc = on_command( ev_iopair->ctx, input, output, &outsize );
+    rc = on_command( ev_iochannel->ctx, input, output, &outsize );
 
     ssize_t nread = p - input;
     ssize_t nwritten = oldsize - outsize;
@@ -217,9 +217,9 @@ int on_command( void *ctx, const char* input, char* output, int *outsize )
 }
 
 
-int on_close( ev_iopair_t* ev_iopair )
+int on_close( ev_iochannel_t* ev_iochannel )
 {
-  client_t *client = (client_t*)ev_iopair->ctx;
+  client_t *client = (client_t*)ev_iochannel->ctx;
   free_client( clients, client );
   return 0;
 }

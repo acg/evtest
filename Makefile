@@ -7,7 +7,7 @@ LIBS = -lev
 OBJECTS = \
 	evtest.o \
 	ev_iobuf.o \
-	ev_iopair.o \
+	ev_iochannel.o \
 	iobuf.o \
 	ndelay_on.o 
 

@@ -6,10 +6,10 @@
 #include "ev_iobuf.h"
 
 
-typedef struct ev_iopair_def_t ev_iopair_t;
-typedef int (*ev_iopair_callback)( ev_iopair_t* );
+typedef struct ev_iochannel_def_t ev_iochannel_t;
+typedef int (*ev_iochannel_callback)( ev_iochannel_t* );
 
-struct ev_iopair_def_t
+struct ev_iochannel_def_t
 {
   struct ev_loop *loop;
   iobuf_t rio;
@@ -18,8 +18,8 @@ struct ev_iopair_def_t
   ev_iobuf_t ev_wio;
   void *ctx;
 
-  ev_iopair_callback on_data;
-  ev_iopair_callback on_close;
+  ev_iochannel_callback on_data;
+  ev_iochannel_callback on_close;
 
   // TODO: 
   // on_writable?
@@ -29,9 +29,9 @@ struct ev_iopair_def_t
 };
 
 
-int ev_iopair_init
+int ev_iochannel_init
 (
-  ev_iopair_t *self,
+  ev_iochannel_t *self,
   struct ev_loop *loop,
   void *ctx,
   int rfd,
