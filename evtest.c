@@ -222,7 +222,7 @@ int on_data( ev_iochannel_t* ev_iochannel )
 
     *(wio->buf + wio->len + nwritten - 1) = '\n';
 
-    rio->on_data_added( wio, nwritten );
+    wio->on_data_added( wio, nwritten );
   }
 
   return 0;
